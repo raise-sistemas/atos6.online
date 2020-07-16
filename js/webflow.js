@@ -16566,6 +16566,22 @@ Webflow.define('links', module.exports = function ($, _) {
 var Webflow = __webpack_require__(2);
 
 Webflow.define('scroll', module.exports = function ($) {
+  // Native browser events & namespaces used in this module
+  var CLICK = 'click';
+  var EMPTY_LINK_NS = '.wf-empty-link';
+  var SCROLL_NS = '.wf-scroll';
+  /**
+   * A collection of namespaced events found in this module.
+   * Namespaced events encapsulate our code, and make it safer and easier
+   * for designers to apply custom code overrides.
+   * @see https://api.jquery.com/on/#event-names
+   * @typedef {Object.<string>} NamespacedEventsCollection
+   */
+
+  var NS_EVENTS = {
+    CLICK_EMPTY: CLICK + EMPTY_LINK_NS,
+    CLICK_SCROLL: CLICK + SCROLL_NS
+  };
   var $doc = $(document);
   var win = window;
   var loc = win.location;
@@ -16718,8 +16734,10 @@ Webflow.define('scroll', module.exports = function ($) {
   }
 
   function ready() {
+    var CLICK_EMPTY = NS_EVENTS.CLICK_EMPTY,
+        CLICK_SCROLL = NS_EVENTS.CLICK_SCROLL;
     locHref = loc.href.split('#')[0];
-    $doc.on('click', localHrefSelector, validateScroll);
+    $doc.on(CLICK_SCROLL, localHrefSelector, validateScroll);
     /**
      * Prevent empty hash links from triggering scroll.
      * Legacy feature to preserve: use the default "#" link
@@ -16727,7 +16745,7 @@ Webflow.define('scroll', module.exports = function ($) {
      * to scroll to the top.
      */
 
-    $doc.on('click', emptyHrefSelector, function (e) {
+    $doc.on(CLICK_EMPTY, emptyHrefSelector, function (e) {
       e.preventDefault();
     });
   } // Export module
@@ -17022,11 +17040,7 @@ Webflow.define('dropdown', module.exports = function ($, _) {
 
     data.links.each(function (idx, link) {
       if (!link.hasAttribute('tabindex')) link.setAttribute('tabindex', '0');
-    }); // Hide focus outline (temporarily, until more widespread a11y
-    // support and communication)
-
-    data.toggle.css('outline', 'none');
-    data.links.css('outline', 'none'); // Remove old events
+    }); // Remove old events
 
     data.el.off(namespace);
     data.toggle.off(namespace);
@@ -18668,11 +18682,23 @@ var Webflow = __webpack_require__(2);
 
 var IXEvents = __webpack_require__(13);
 
+var KEY_CODES = {
+  ARROW_LEFT: 37,
+  ARROW_UP: 38,
+  ARROW_RIGHT: 39,
+  ARROW_DOWN: 40,
+  ESCAPE: 27,
+  SPACE: 32,
+  ENTER: 13,
+  HOME: 36,
+  END: 35
+};
 Webflow.define('navbar', module.exports = function ($, _) {
   var api = {};
   var tram = $.tram;
   var $win = $(window);
   var $doc = $(document);
+  var debounce = _.debounce;
   var $body;
   var $navbars;
   var designer;
@@ -18740,7 +18766,8 @@ Webflow.define('navbar', module.exports = function ($, _) {
       data = $.data(el, namespace, {
         open: false,
         el: $el,
-        config: {}
+        config: {},
+        selectedIdx: -1
       });
     }
 
@@ -18751,7 +18778,29 @@ Webflow.define('navbar', module.exports = function ($, _) {
     data.dropdownList = data.menu.find('.w-dropdown-list');
     data.button = $el.find('.w-nav-button');
     data.container = $el.find('.w-container');
-    data.outside = outside(data); // Remove old events
+    data.overlayContainerId = 'w-nav-overlay-' + i;
+    data.outside = outside(data); //   If the brand links exists and is set to link to the homepage, the
+    // default setting, then add an aria-label
+
+    var navBrandLink = $el.find('.w-nav-brand');
+
+    if (navBrandLink && navBrandLink.attr('href') === '/' && navBrandLink.attr('aria-label') == null) {
+      navBrandLink.attr('aria-label', 'home');
+    } //   VoiceOver bug, when items that disallow user selection are focused
+    // VoiceOver gets confused and scrolls to the end of the page. ¯\_(ツ)_/¯
+
+
+    data.button.attr('style', '-webkit-user-select: text;'); // Add attributes to toggle element
+
+    if (data.button.attr('aria-label') == null) {
+      data.button.attr('aria-label', 'menu');
+    }
+
+    data.button.attr('role', 'button');
+    data.button.attr('tabindex', '0');
+    data.button.attr('aria-controls', data.overlayContainerId);
+    data.button.attr('aria-haspopup', 'menu');
+    data.button.attr('aria-expanded', 'false'); // Remove old events
 
     data.el.off(namespace);
     data.button.off(namespace);
@@ -18766,6 +18815,8 @@ Webflow.define('navbar', module.exports = function ($, _) {
       addOverlay(data);
       data.button.on('click' + namespace, toggle(data));
       data.menu.on('click' + namespace, 'a', navigate(data));
+      data.button.on('keydown' + namespace, makeToggleButtonKeyboardHandler(data));
+      data.el.on('keydown' + namespace, makeLinksKeyboardHandler(data));
     } // Trigger initial resize
 
 
@@ -18797,6 +18848,7 @@ Webflow.define('navbar', module.exports = function ($, _) {
     }
 
     data.overlay = $(overlay).appendTo(data.el);
+    data.overlay.attr('id', data.overlayContainerId);
     data.parent = data.menu.parent();
     close(data, true);
   }
@@ -18838,6 +18890,112 @@ Webflow.define('navbar', module.exports = function ($, _) {
     };
   }
 
+  function makeToggleButtonKeyboardHandler(data) {
+    return function (evt) {
+      switch (evt.keyCode) {
+        case KEY_CODES.SPACE:
+        case KEY_CODES.ENTER:
+          {
+            // Toggle returns a function
+            toggle(data)();
+            evt.preventDefault();
+            return evt.stopPropagation();
+          }
+
+        case KEY_CODES.ESCAPE:
+          {
+            close(data);
+            evt.preventDefault();
+            return evt.stopPropagation();
+          }
+
+        case KEY_CODES.ARROW_RIGHT:
+        case KEY_CODES.ARROW_DOWN:
+        case KEY_CODES.HOME:
+        case KEY_CODES.END:
+          {
+            if (!data.open) {
+              evt.preventDefault();
+              return evt.stopPropagation();
+            }
+
+            if (evt.keyCode === KEY_CODES.END) {
+              data.selectedIdx = data.links.length - 1;
+            } else {
+              data.selectedIdx = 0;
+            }
+
+            focusSelectedLink(data);
+            evt.preventDefault();
+            return evt.stopPropagation();
+          }
+      }
+    };
+  }
+
+  function makeLinksKeyboardHandler(data) {
+    return function (evt) {
+      if (!data.open) {
+        return;
+      } // Realign selectedIdx with the menu item that is currently in focus.
+      // We need this because we do not track the `Tab` key activity!
+
+
+      data.selectedIdx = data.links.index(document.activeElement);
+
+      switch (evt.keyCode) {
+        case KEY_CODES.HOME:
+        case KEY_CODES.END:
+          {
+            if (evt.keyCode === KEY_CODES.END) {
+              data.selectedIdx = data.links.length - 1;
+            } else {
+              data.selectedIdx = 0;
+            }
+
+            focusSelectedLink(data);
+            evt.preventDefault();
+            return evt.stopPropagation();
+          }
+
+        case KEY_CODES.ESCAPE:
+          {
+            close(data); // Focus toggle button
+
+            data.button.focus();
+            evt.preventDefault();
+            return evt.stopPropagation();
+          }
+
+        case KEY_CODES.ARROW_LEFT:
+        case KEY_CODES.ARROW_UP:
+          {
+            data.selectedIdx = Math.max(-1, data.selectedIdx - 1);
+            focusSelectedLink(data);
+            evt.preventDefault();
+            return evt.stopPropagation();
+          }
+
+        case KEY_CODES.ARROW_RIGHT:
+        case KEY_CODES.ARROW_DOWN:
+          {
+            data.selectedIdx = Math.min(data.links.length - 1, data.selectedIdx + 1);
+            focusSelectedLink(data);
+            evt.preventDefault();
+            return evt.stopPropagation();
+          }
+      }
+    };
+  }
+
+  function focusSelectedLink(data) {
+    if (data.links[data.selectedIdx]) {
+      var selectedElement = data.links[data.selectedIdx];
+      selectedElement.focus();
+      navigate(selectedElement);
+    }
+  }
+
   function reopen(data) {
     if (!data.open) {
       return;
@@ -18849,7 +19007,7 @@ Webflow.define('navbar', module.exports = function ($, _) {
 
   function toggle(data) {
     // Debounce toggle to wait for accurate open state
-    return _.debounce(function () {
+    return debounce(function () {
       data.open ? close(data) : open(data);
     });
   }
@@ -18889,7 +19047,7 @@ Webflow.define('navbar', module.exports = function ($, _) {
     };
   }
 
-  var outsideDebounced = _.debounce(function (data, $target) {
+  var outsideDebounced = debounce(function (data, $target) {
     if (!data.open) {
       return;
     }
@@ -18985,6 +19143,7 @@ Webflow.define('navbar', module.exports = function ($, _) {
 
 
     if (immediate) {
+      complete();
       return;
     }
 
@@ -19002,7 +19161,7 @@ Webflow.define('navbar', module.exports = function ($, _) {
         height: bodyHeight
       }).start({
         x: 0
-      });
+      }).then(complete);
       data.overlay && data.overlay.width(menuWidth);
       return;
     } // Drop Down
@@ -19013,7 +19172,11 @@ Webflow.define('navbar', module.exports = function ($, _) {
       y: -offsetY
     }).start({
       y: 0
-    });
+    }).then(complete);
+
+    function complete() {
+      data.button.attr('aria-expanded', 'true');
+    }
   }
 
   function setOverlayHeight(data) {
@@ -19091,6 +19254,7 @@ Webflow.define('navbar', module.exports = function ($, _) {
 
 
       data.el.triggerHandler('w-close');
+      data.button.attr('aria-expanded', 'false');
     }
   } // Export module
 
