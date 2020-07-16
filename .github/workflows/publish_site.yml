@@ -5,10 +5,11 @@ on:
 
 jobs:
   deploy:
-    name: 'Deploy to Netlify'
+    runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, '[ci skip]')"
     steps:
-      - uses: jsmrcaga/action-netlify-deploy@v1.1.0
+      - name: 'Deploy to Netlify'
+        uses: jsmrcaga/action-netlify-deploy@v1.1.0
         with:
           NETLIFY_AUTH_TOKEN: ${{ secrets.A6_BOT_PAT_TOKEN }}
           NETLIFY_DEPLOY_TO_PROD: true
